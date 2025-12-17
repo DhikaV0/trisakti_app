@@ -1,6 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter/services.dart';
+import 'package:dio/dio.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
 
 void main() {
   runApp(const MyApp());
@@ -38,11 +42,24 @@ class _WebViewPageState extends State<WebViewPage> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setNavigationDelegate(
         NavigationDelegate(
+
+          // State Loading
           onPageStarted: (_) {
             setState(() => isLoading = true);
           },
           onPageFinished: (_) {
             setState(() => isLoading = false);
+          },
+
+          // Request Download File
+          onNavigationRequest: (request) {
+            if (request.url.contains('download') ||
+                request.url.contains('export') ||
+                request.url.contains('pdf')) {
+              _downloadFile(request.url);
+              return NavigationDecision.prevent;
+            }
+            return NavigationDecision.navigate;
           },
         ),
       )
@@ -51,6 +68,39 @@ class _WebViewPageState extends State<WebViewPage> {
       );
   }
 
+  // Logika Download File
+  Future<void> _downloadFile(String url) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final fileName = 'download_${DateTime.now().millisecondsSinceEpoch}.pdf';
+      final filePath = '${dir.path}/$fileName';
+  
+      await Dio().download(url, filePath);
+  
+      if (!mounted) return;
+  
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('File berhasil diunduh. Ketuk untuk membuka'),
+          action: SnackBarAction(
+            label: 'Buka',
+            onPressed: () {
+              OpenFilex.open(filePath);
+            },
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Gagal mengunduh file'),
+        ),
+      );
+    }
+  }
+
+  // Logika Tombol Back
   Future<void> _handleBack() async {
     if (await controller.canGoBack()) {
       await controller.goBack();

@@ -1,8 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
+import 'package:file_picker/file_picker.dart';
 
 void main() {
   runApp(const MyApp());
@@ -47,26 +49,67 @@ class _WebViewPageState extends State<WebViewPage> {
         NavigationDelegate(
           onPageStarted: (_) => setState(() => isLoading = true),
           onPageFinished: (_) => setState(() => isLoading = false),
-          onNavigationRequest: (_) {
-            return NavigationDecision.navigate;
-          },
         ),
       )
-      ..loadRequest(
-        Uri.parse('https://trisakti.digitalforte.id'),
-      );
+      ..loadRequest(Uri.parse('https://trisakti.digitalforte.id'));
 
     if (Platform.isAndroid) {
-      final androidController =
-          controller.platform as AndroidWebViewController;
+      final androidController = controller.platform as AndroidWebViewController;
 
       androidController.setOnShowFileSelector((params) async {
-        return params.acceptTypes;
+        final result = await FilePicker.platform.pickFiles(
+          type: FileType.image,
+          allowMultiple: false,
+          withData: true,
+        );
+      
+        if (result == null || result.files.single.bytes == null) {
+          return [];
+        }
+      
+        final file = result.files.single;
+        final base64 = base64Encode(file.bytes!);
+        final name = file.name;
+        final ext = name.split('.').last.toLowerCase();
+      
+        final mime = ext == 'png'
+            ? 'image/png'
+            : ext == 'webp'
+                ? 'image/webp'
+                : ext == 'gif'
+                    ? 'image/gif'
+                    : 'image/jpeg';
+      
+        final js = '''
+          (function() {
+            const input = document.getElementById('photo_profile');
+            if (!input) return;
+      
+            const binary = atob("$base64");
+            const array = [];
+            for (let i = 0; i < binary.length; i++) {
+              array.push(binary.charCodeAt(i));
+            }
+      
+            const blob = new Blob([new Uint8Array(array)], { type: "$mime" });
+            const file = new File([blob], "$name", { type: "$mime" });
+      
+            const dataTransfer = new DataTransfer();
+            dataTransfer.items.add(file);
+            input.files = dataTransfer.files;
+      
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          })();
+        ''';
+      
+        await controller.runJavaScript(js);
+      
+        return [];
       });
     }
   }
 
-  // Back button logic
+  /// Handle back logic
   Future<void> _handleBack() async {
     if (await controller.canGoBack()) {
       await controller.goBack();
@@ -101,8 +144,7 @@ class _WebViewPageState extends State<WebViewPage> {
         body: Stack(
           children: [
             WebViewWidget(controller: controller),
-            if (isLoading)
-              const Center(child: CircularProgressIndicator()),
+            if (isLoading) const Center(child: CircularProgressIndicator()),
           ],
         ),
       ),

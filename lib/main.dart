@@ -1,10 +1,11 @@
-import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 void main() {
   runApp(const MyApp());
@@ -45,8 +46,27 @@ class _WebViewPageState extends State<WebViewPage> {
     controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.transparent)
+      ..addJavaScriptChannel(
+          'FlutterDebug',
+          onMessageReceived: (message) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(message.message),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+        )
       ..setNavigationDelegate(
         NavigationDelegate(
+          onNavigationRequest: (request) {
+            if (request.url.contains('/api/member-card/export')) {
+              downloadPdf(request.url);
+              return NavigationDecision.prevent;
+            }
+            return NavigationDecision.navigate;
+          },
           onPageStarted: (_) => setState(() => isLoading = true),
           onPageFinished: (_) => setState(() => isLoading = false),
         ),
@@ -54,62 +74,56 @@ class _WebViewPageState extends State<WebViewPage> {
       ..loadRequest(Uri.parse('https://trisakti.digitalforte.id'));
 
     if (Platform.isAndroid) {
-      final androidController = controller.platform as AndroidWebViewController;
+      final androidController =
+          controller.platform as AndroidWebViewController;
 
       androidController.setOnShowFileSelector((params) async {
         final result = await FilePicker.platform.pickFiles(
           type: FileType.image,
           allowMultiple: false,
-          withData: true,
         );
-      
-        if (result == null || result.files.single.bytes == null) {
+
+        if (result == null || result.files.single.path == null) {
           return [];
         }
-      
-        final file = result.files.single;
-        final base64 = base64Encode(file.bytes!);
-        final name = file.name;
-        final ext = name.split('.').last.toLowerCase();
-      
-        final mime = ext == 'png'
-            ? 'image/png'
-            : ext == 'webp'
-                ? 'image/webp'
-                : ext == 'gif'
-                    ? 'image/gif'
-                    : 'image/jpeg';
-      
-        final js = '''
-          (function() {
-            const input = document.getElementById('photo_profile');
-            if (!input) return;
-      
-            const binary = atob("$base64");
-            const array = [];
-            for (let i = 0; i < binary.length; i++) {
-              array.push(binary.charCodeAt(i));
-            }
-      
-            const blob = new Blob([new Uint8Array(array)], { type: "$mime" });
-            const file = new File([blob], "$name", { type: "$mime" });
-      
-            const dataTransfer = new DataTransfer();
-            dataTransfer.items.add(file);
-            input.files = dataTransfer.files;
-      
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-          })();
-        ''';
-      
-        await controller.runJavaScript(js);
-      
-        return [];
+
+        final filePath = result.files.single.path!;
+        return [Uri.file(filePath).toString()];
       });
     }
   }
 
-  /// Handle back logic
+  Future<void> downloadPdf(String url) async {
+    try {
+      final response = await http.get(Uri.parse(url));
+      final contentType = response.headers['content-type'];
+
+      if (response.statusCode != 200 ||
+          contentType == null ||
+          !contentType.contains('application/pdf')) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Gagal: response bukan PDF')),
+        );
+        return;
+      }
+
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File(
+        '${dir.path}/member_card_${DateTime.now().millisecondsSinceEpoch}.pdf',
+      );
+
+      await file.writeAsBytes(response.bodyBytes);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('PDF tersimpan: ${file.path}')),
+      );
+    } catch (_) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gagal download PDF')),
+      );
+    }
+  }
+
   Future<void> _handleBack() async {
     if (await controller.canGoBack()) {
       await controller.goBack();
@@ -120,14 +134,12 @@ class _WebViewPageState extends State<WebViewPage> {
     if (lastBackPress == null ||
         now.difference(lastBackPress!) > const Duration(seconds: 2)) {
       lastBackPress = now;
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Tekan sekali lagi untuk keluar'),
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tekan sekali lagi untuk keluar'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     } else {
       SystemNavigator.pop();
     }
@@ -144,7 +156,8 @@ class _WebViewPageState extends State<WebViewPage> {
         body: Stack(
           children: [
             WebViewWidget(controller: controller),
-            if (isLoading) const Center(child: CircularProgressIndicator()),
+            if (isLoading)
+              const Center(child: CircularProgressIndicator()),
           ],
         ),
       ),

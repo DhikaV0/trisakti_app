@@ -9,11 +9,12 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  webview_flutter: ^4.13.0
-  webview_flutter_android: ^4.10.7
-  webview_flutter_wkwebview: ^3.23.4
-  flutter_launcher_icons: ^0.14.4
-  file_picker: ^8.0.0
+  webview_flutter: ^4.13.1
+  webview_flutter_android: ^4.10.11
+  file_picker: ^10.3.8
+  http: ^1.6.0
+  path_provider: ^2.1.5
+  open_filex: ^4.6.0
 
 dev_dependencies:
   flutter_test:

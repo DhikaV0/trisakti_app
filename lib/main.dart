@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -47,24 +48,27 @@ class _WebViewPageState extends State<WebViewPage> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.transparent)
       ..addJavaScriptChannel(
-          'FlutterDebug',
-          onMessageReceived: (message) {
-            if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(message.message),
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          },
-        )
+        'FlutterDebug',
+        onMessageReceived: (message) async {
+          try {
+            final data = jsonDecode(message.message);
+
+            if (data['type'] == 'download_member_card') {
+              final url = data['url'];
+              final token = data['token'];
+
+              if (url != null && token != null) {
+                await downloadPdf(url, token);
+              }
+            }
+          } catch (e) {
+            debugPrint('JS Channel error: $e');
+          }
+        },
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
           onNavigationRequest: (request) {
-            if (request.url.contains('/api/member-card/export')) {
-              downloadPdf(request.url);
-              return NavigationDecision.prevent;
-            }
             return NavigationDecision.navigate;
           },
           onPageStarted: (_) => setState(() => isLoading = true),
@@ -93,33 +97,47 @@ class _WebViewPageState extends State<WebViewPage> {
     }
   }
 
-  Future<void> downloadPdf(String url) async {
+  Future<void> downloadPdf(String url, String token) async {
     try {
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/pdf',
+        },
+      );
+  
+      if (response.statusCode == 401) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Session habis. Silakan login ulang.')),
+        );
+        return;
+      }
+  
       final contentType = response.headers['content-type'];
-
+  
       if (response.statusCode != 200 ||
           contentType == null ||
           !contentType.contains('application/pdf')) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Gagal: response bukan PDF')),
+          const SnackBar(content: Text('Gagal download: bukan file PDF')),
         );
         return;
       }
-
+  
       final dir = await getApplicationDocumentsDirectory();
       final file = File(
         '${dir.path}/member_card_${DateTime.now().millisecondsSinceEpoch}.pdf',
       );
-
+  
       await file.writeAsBytes(response.bodyBytes);
-
+  
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('PDF tersimpan: ${file.path}')),
+        SnackBar(content: Text('PDF tersimpan di:\n${file.path}')),
       );
-    } catch (_) {
+    } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Gagal download PDF')),
+        const SnackBar(content: Text('Terjadi error saat download PDF')),
       );
     }
   }

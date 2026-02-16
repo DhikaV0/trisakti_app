@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
+import 'package:open_filex/open_filex.dart';
 
 void main() {
   runApp(const MyApp());
@@ -34,6 +36,7 @@ class WebViewPage extends StatefulWidget {
 class _WebViewPageState extends State<WebViewPage> {
   late final WebViewController controller;
   bool isLoading = true;
+  bool isDownloading = false;
   DateTime? lastBackPress;
 
   @override
@@ -47,6 +50,7 @@ class _WebViewPageState extends State<WebViewPage> {
     controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.transparent)
+      // Debug channel - also handles download messages in case web uses this channel
       ..addJavaScriptChannel(
         'FlutterDebug',
         onMessageReceived: (message) async {
@@ -78,9 +82,9 @@ class _WebViewPageState extends State<WebViewPage> {
       ..loadRequest(Uri.parse('https://trisakti.digitalforte.id'));
 
     if (Platform.isAndroid) {
-      final androidController =
-          controller.platform as AndroidWebViewController;
+      final androidController = controller.platform as AndroidWebViewController;
 
+      // Handle file picker for photo uploads
       androidController.setOnShowFileSelector((params) async {
         final result = await FilePicker.platform.pickFiles(
           type: FileType.image,
@@ -142,6 +146,13 @@ class _WebViewPageState extends State<WebViewPage> {
     }
   }
 
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _handleBack() async {
     if (await controller.canGoBack()) {
       await controller.goBack();
@@ -152,12 +163,7 @@ class _WebViewPageState extends State<WebViewPage> {
     if (lastBackPress == null ||
         now.difference(lastBackPress!) > const Duration(seconds: 2)) {
       lastBackPress = now;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tekan sekali lagi untuk keluar'),
-          duration: Duration(seconds: 2),
-        ),
-      );
+      _showMessage('Tekan sekali lagi untuk keluar');
     } else {
       SystemNavigator.pop();
     }
@@ -167,16 +173,17 @@ class _WebViewPageState extends State<WebViewPage> {
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, result) {
         if (!didPop) _handleBack();
       },
       child: Scaffold(
-        body: Stack(
-          children: [
-            WebViewWidget(controller: controller),
-            if (isLoading)
-              const Center(child: CircularProgressIndicator()),
-          ],
+        body: SafeArea(
+          child: Stack(
+            children: [
+              WebViewWidget(controller: controller),
+              if (isLoading) const Center(child: CircularProgressIndicator()),
+            ],
+          ),
         ),
       ),
     );
